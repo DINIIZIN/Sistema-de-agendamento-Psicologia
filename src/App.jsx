@@ -1,96 +1,122 @@
-// Importa os componentes necessários para criar rotas no React
-import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { api } from "./api";
 
-// Importa o useState para gerenciar estados (dados) dentro do componente
-import { useState } from "react"
+import Login from "./Login";
+import Dashboard from "./Dashboard";
+import AdminDashboard from "./AdminDashboard";
+import Pacientes from "./Pacientes";
+import Agendamentos from "./Agendamentos";
+import CadastroEstagiario from "./cadastro-estagiario";
 
-// Importa as páginas do sistema
-import Login from "./Login"
-import Dashboard from "./Dashboard"
-import Pacientes from "./Pacientes"
-import Agendamentos from "./Agendamentos"
-
-// Componente principal da aplicação (ponto de entrada da lógica do sistema)
-function App(){
-
-  // Estado que guarda a lista de pacientes cadastrados
-  // Começa vazio []
-  const [pacientes, setPacientes] = useState([])
-
-  // Estado que guarda a lista de agendamentos realizados
-  // Também começa vazio []
-  const [agendamentos, setAgendamentos] = useState([])
- 
-  // Função responsável por adicionar um novo agendamento na lista
-  function adicionarAgendamento(novoAgendamento){
-
-    // Atualiza o estado:
-    // pega a lista atual de agendamentos
-    // e adiciona o novo no final
-    setAgendamentos([...agendamentos, novoAgendamento])
-  }
-
-  // Função responsável por adicionar um novo paciente na lista
-  function adicionarPaciente(novoPaciente){
-
-    // Atualiza o estado:
-    // pega a lista atual de pacientes
-    // e adiciona o novo no final
-    setPacientes([...pacientes, novoPaciente])
-  }   
-
-  // Retorno do componente (o que será renderizado na tela)
-  return(
-
-  // Envolve toda a aplicação com o sistema de rotas
-  <BrowserRouter>
-
-    {/* Define todas as rotas do sistema */}
-    <Routes>
-
-      {/* Rota inicial "/" → tela de Login */}
-      <Route path="/" element={<Login/>}/>
-
-      {/* Rota do Dashboard */}
-      <Route path="/Dashboard" element={<Dashboard/>}/>
-
-      {/* Rota de Pacientes */}
-      <Route 
-        path="/Pacientes" 
-        element={
-          <Pacientes 
-            // Envia a função para cadastrar novos pacientes
-            adicionarPaciente={adicionarPaciente} 
-
-            // (opcional) está sendo enviada também, mas normalmente não precisa aqui
-            adicionarAgendamento={adicionarAgendamento}
-          />
-        }
-      />
-
-      {/* Rota de Agendamentos */}
-      <Route 
-        path="/Agendamentos" 
-        element={
-          <Agendamentos 
-
-            // Envia a lista de pacientes para a tela de agendamento
-            pacientes={pacientes}
-
-            // Envia a lista de agendamentos já feitos
-            agendamentos={agendamentos}
-
-            // Envia a função para criar novos agendamentos
-            adicionarAgendamento={adicionarAgendamento}
-          />
-        }
-      />  
-
-    </Routes>
-    
-  </BrowserRouter>
-  )
+function RotaProtegida({ usuario, children }) {
+  if (!usuario) return <Navigate to="/" replace />;
+  return children;
 }
 
-// Exporta o componente App para ser usado no sistema
-export default App
+function RotaAdmin({ usuario, children }) {
+  if (!usuario) return <Navigate to="/" replace />;
+  if (usuario.perfil !== "MEDICO") return <Navigate to="/Dashboard" replace />;
+  return children;
+}
+
+function decodeToken(token) {
+  try {
+    const payload = token.split(".")[1];
+    return JSON.parse(atob(payload));
+  } catch {
+    return null;
+  }
+}
+
+function App() {
+  const [pacientes, setPacientes] = useState([]);
+  const [agendamentos, setAgendamentos] = useState([]);
+  const [limites, setLimites] = useState(null);
+
+  const [usuarioLogado, setUsuarioLogado] = useState(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return null;
+    const decoded = decodeToken(token);
+    if (!decoded || decoded.exp * 1000 < Date.now()) {
+      localStorage.removeItem("token");
+      return null;
+    }
+    return { id: decoded.id, nome: decoded.nome, perfil: decoded.perfil };
+  });
+
+  const carregarDados = async () => {
+    try {
+      const [dataPacientes, dataAgendamentos, dataLimites] = await Promise.all([
+        api.get("/pacientes"),
+        api.get("/agendamentos"),
+        api.get("/meus-limites"),
+      ]);
+      setPacientes(dataPacientes);
+      setAgendamentos(dataAgendamentos);
+      setLimites(dataLimites);
+    } catch (err) {
+      console.error("Erro ao carregar dados:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (usuarioLogado && usuarioLogado.perfil !== "MEDICO") carregarDados();
+  }, [usuarioLogado]);
+
+  function logout() {
+    localStorage.removeItem("token");
+    setUsuarioLogado(null);
+    setPacientes([]);
+    setAgendamentos([]);
+    setLimites(null);
+  }
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Login setUsuarioLogado={setUsuarioLogado} />} />
+        <Route path="/cadastro-estagiario" element={<CadastroEstagiario />} />
+
+        <Route
+          path="/admin"
+          element={
+            <RotaAdmin usuario={usuarioLogado}>
+              <AdminDashboard usuario={usuarioLogado} logout={logout} />
+            </RotaAdmin>
+          }
+        />
+
+        <Route
+          path="/Dashboard"
+          element={
+            <RotaProtegida usuario={usuarioLogado}>
+              <Dashboard usuario={usuarioLogado} logout={logout} limites={limites} pacientes={pacientes} />
+            </RotaProtegida>
+          }
+        />
+        <Route
+          path="/Pacientes"
+          element={
+            <RotaProtegida usuario={usuarioLogado}>
+              <Pacientes atualizarLista={carregarDados} usuario={usuarioLogado} pacientes={pacientes} limites={limites} />
+            </RotaProtegida>
+          }
+        />
+        <Route
+          path="/Agendamentos"
+          element={
+            <RotaProtegida usuario={usuarioLogado}>
+              <Agendamentos pacientes={pacientes} agendamentos={agendamentos} atualizarLista={carregarDados} usuario={usuarioLogado} limites={limites} />
+            </RotaProtegida>
+          }
+        />
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;
+  

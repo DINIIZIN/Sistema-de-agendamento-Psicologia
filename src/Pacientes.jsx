@@ -1,128 +1,113 @@
-// Importa o useState para controlar os dados dos inputs
-import { useState } from "react"
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "./api";
 
-// Importa o useNavigate para navegação entre telas
-import { useNavigate } from "react-router-dom"
+function Pacientes({ atualizarLista, usuario, pacientes, limites }) {
+  const [nome, setNome] = useState("");
+  const [endereco, setEndereco] = useState("");
+  const [email, setEmail] = useState("");
+  const [telefone, setTelefone] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [erro, setErro] = useState("");
+  const [sucesso, setSucesso] = useState("");
+  const [editando, setEditando] = useState(null); // paciente sendo editado
+  const navigate = useNavigate();
 
-// Componente da tela de Pacientes
-// Recebe via props a função adicionarPaciente (vem do App.jsx)
-function Pacientes({adicionarPaciente}){
+  const limiteAtingido = limites && limites.totalPacientes >= limites.maxPacientes;
 
-  // Estados para armazenar os dados digitados no formulário
-  const[nome, setNome] = useState("")          // nome do paciente
-  const[endereco, setEndereco] = useState("")  // endereço
-  const[email, setEmail] = useState("")        // e-mail
-  const[telefone, setTelefone] = useState("")  // telefone
-  const[cpf, setCpf] = useState("")            // CPF
-
-  // Estados para mensagens
-  const[erro, setErro] = useState("")          // mensagem de erro
-  const[sucesso, setSucesso] = useState("")    // mensagem de sucesso
-
-  // Hook para navegação
-  const navigate = useNavigate()
-
-  // Função para voltar para o dashboard
-  function voltar_dashboard(){
-    navigate("/dashboard")
+  async function cadastrar() {
+    if (!nome || !cpf) { setErro("Nome e CPF são obrigatórios."); return; }
+    setErro(""); setSucesso("");
+    try {
+      await api.post('/pacientes', { nome, cpf, endereco, email, telefone });
+      await atualizarLista();
+      setSucesso("Paciente cadastrado com sucesso!");
+      setNome(""); setCpf(""); setEndereco(""); setEmail(""); setTelefone("");
+    } catch (err) {
+      setErro(err.error || "Erro ao cadastrar paciente.");
+    }
   }
 
-  // Função principal para cadastrar paciente
-  function confirmar_dados(){
-
-    // Validação: verifica se todos os campos foram preenchidos
-    if(!nome || !endereco || !email || !telefone || !cpf){
-      setErro("Preencha todos os campos.") // mostra erro
-      return // interrompe execução
+  async function salvarEdicao() {
+    if (!editando.nome_enc || !editando.cpf_hash) { setErro("Nome e CPF são obrigatórios."); return; }
+    setErro(""); setSucesso("");
+    try {
+      await api.put(`/pacientes/${editando.id}`, {
+        nome: editando.nome_enc,
+        cpf: editando.cpf_hash,
+        endereco: editando.endereco,
+        email: editando.email,
+        telefone: editando.telefone,
+      });
+      await atualizarLista();
+      setSucesso("Paciente atualizado!");
+      setEditando(null);
+    } catch (err) {
+      setErro(err.error || "Erro ao atualizar paciente.");
     }
+  }
 
-    // Cria o objeto do novo paciente
-    const novoPaciente = {
-      id: Date.now(),      // cria um ID único
-      nome: nome,          // nome digitado
-      endereco: endereco,  // endereço digitado
-      email: email,        // email digitado
-      telefone: telefone,  // telefone digitado
-      cpf: cpf             // CPF digitado
-    }
-
-    // Envia o novo paciente para o App.jsx (onde fica armazenado)
-    adicionarPaciente(novoPaciente)
-
-    // Mostra mensagem de sucesso
-    setSucesso("Paciente cadastrado com sucesso!")
-
-    // Limpa os campos após cadastro
-    setNome("")
-    setEndereco("")
-    setEmail("")
-    setTelefone("")
-    setCpf("")
-  }    
-
-  // Interface da tela
-  return( 
-    <div>
-
-      {/* Título da página */}
+  return (
+    <div style={{ maxWidth: 600, margin: "20px auto", padding: 20 }}>
       <h1>Pacientes</h1>
-      <h2>Cadastro de Pacientes</h2>
-      
-      {/* Input do nome */}
-      <input 
-        type="text" 
-        placeholder="Nome do Paciente"
-        value={nome}
-        onChange={(e) => setNome(e.target.value)}
-      />
 
-      {/* Input do endereço */}
-      <input 
-        type="text" 
-        placeholder="Endereço"
-        value={endereco}
-        onChange={(e) => setEndereco(e.target.value)}
-      />
+      {limites && (
+        <div style={{ background: limiteAtingido ? "#fff0f0" : "#f0fff0", border: `1px solid ${limiteAtingido ? "#ffcccc" : "#ccffcc"}`, borderRadius: 8, padding: 12, marginBottom: 16 }}>
+          <strong>Pacientes cadastrados: {limites.totalPacientes} / {limites.maxPacientes}</strong>
+          {limiteAtingido && <span style={{ color: "red", marginLeft: 8 }}>— Limite atingido</span>}
+        </div>
+      )}
 
-      {/* Input do e-mail */}
-      <input 
-        type="text" 
-        placeholder="E-mail"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      {!limiteAtingido && (
+        <>
+          <h2>Novo Paciente</h2>
+          <input type="text" placeholder="Nome *" value={nome} onChange={(e) => setNome(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8 }} />
+          <input type="text" placeholder="CPF *" value={cpf} onChange={(e) => setCpf(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8 }} />
+          <input type="text" placeholder="Endereço" value={endereco} onChange={(e) => setEndereco(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8 }} />
+          <input type="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8 }} />
+          <input type="text" placeholder="Telefone" value={telefone} onChange={(e) => setTelefone(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8 }} />
+          <button onClick={cadastrar} style={{ width: "100%", padding: 10, marginBottom: 8 }}>Cadastrar Paciente</button>
+        </>
+      )}
 
-      {/* Input do telefone */}
-      <input 
-        type="text" 
-        placeholder="Telefone"
-        value={telefone}
-        onChange={(e) => setTelefone(e.target.value)}
-      />   
+      <button onClick={() => navigate("/Dashboard")} style={{ width: "100%", padding: 10, marginBottom: 16 }}>Voltar</button>
 
-      {/* Input do CPF */}
-      <input 
-        type="text"
-        placeholder="CPF"
-        value={cpf}
-        onChange={(e) => setCpf(e.target.value)}
-      />
+      {erro && <p style={{ color: "red" }}>{erro}</p>}
+      {sucesso && <p style={{ color: "green" }}>{sucesso}</p>}
 
-      {/* Botão que chama a função de cadastro */}
-      <button onClick={confirmar_dados}>Cadastrar Paciente</button>
-
-      {/* Botão para voltar */}
-      <button onClick={voltar_dashboard}>Voltar</button>
-
-      {/* Exibe erro somente se existir */}
-      {erro && <p style={{color: "red"}}>{erro}</p>}
-
-      {/* Exibe sucesso somente se existir */}
-      {sucesso && <p style={{color: "green"}}>{sucesso}</p>}
-
+      <h2>Pacientes Cadastrados ({pacientes.length})</h2>
+      {pacientes.length === 0 ? (
+        <p>Nenhum paciente cadastrado ainda.</p>
+      ) : (
+        pacientes.map((p) => (
+          <div key={p.id} style={{ border: "1px solid #ccc", margin: "8px 0", padding: 12, borderRadius: 6 }}>
+            {editando?.id === p.id ? (
+              <>
+                <input value={editando.nome_enc} onChange={(e) => setEditando({ ...editando, nome_enc: e.target.value })} placeholder="Nome" style={{ width: "100%", padding: 8, marginBottom: 6 }} />
+                <input value={editando.cpf_hash || ""} onChange={(e) => setEditando({ ...editando, cpf_hash: e.target.value })} placeholder="CPF" style={{ width: "100%", padding: 8, marginBottom: 6 }} />
+                <input value={editando.endereco || ""} onChange={(e) => setEditando({ ...editando, endereco: e.target.value })} placeholder="Endereço" style={{ width: "100%", padding: 8, marginBottom: 6 }} />
+                <input value={editando.email || ""} onChange={(e) => setEditando({ ...editando, email: e.target.value })} placeholder="E-mail" style={{ width: "100%", padding: 8, marginBottom: 6 }} />
+                <input value={editando.telefone || ""} onChange={(e) => setEditando({ ...editando, telefone: e.target.value })} placeholder="Telefone" style={{ width: "100%", padding: 8, marginBottom: 6 }} />
+                <button onClick={salvarEdicao} style={{ marginRight: 8 }}>Salvar</button>
+                <button onClick={() => setEditando(null)}>Cancelar</button>
+              </>
+            ) : (
+              <>
+                <p><strong>Nome:</strong> {p.nome}</p>
+                <p><strong>CPF:</strong> {p.cpf}</p>
+                {p.telefone && <p><strong>Telefone:</strong> {p.telefone}</p>}
+                {p.email && <p><strong>E-mail:</strong> {p.email}</p>}
+                {p.endereco && <p><strong>Endereço:</strong> {p.endereco}</p>}
+                <button onClick={() => setEditando({ id: p.id, nome_enc: p.nome, cpf_hash: p.cpf, endereco: p.endereco, email: p.email, telefone: p.telefone })}>
+                  ✏️ Editar
+                </button>
+              </>
+            )}
+          </div>
+        ))
+      )}
     </div>
-  )
+  );
 }
 
-// Exporta o componente
-export default Pacientes
+export default Pacientes;

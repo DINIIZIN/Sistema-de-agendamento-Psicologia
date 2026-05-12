@@ -1,176 +1,199 @@
-// Importa o useState para controlar estados (dados) dentro da tela
-import { useState } from "react"
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "./api";
 
-// Importa o useNavigate para fazer navegação entre telas
-import { useNavigate } from "react-router-dom"
+const TODAS_SALAS = [1, 2, 3, 4, 5, 6, 7];
 
-// Componente da tela de Agendamentos
-// Recebe via props:
-// - pacientes (lista de pacientes)
-// - agendamentos (lista de agendamentos já feitos)
-// - adicionarAgendamento (função para salvar novo agendamento)
-function Agendamentos({ pacientes, agendamentos, adicionarAgendamento }) {
+function Agendamentos({ pacientes, agendamentos, atualizarLista, usuario, limites }) {
+  const [paciente, setPaciente] = useState("");
+  const [data, setData] = useState("");
+  const [hora, setHora] = useState("");
+  const [sala, setSala] = useState("");
+  const [salasOcupadas, setSalasOcupadas] = useState([]);
+  const [erro, setErro] = useState("");
+  const [sucesso, setSucesso] = useState("");
+  const [editandoId, setEditandoId] = useState(null);
+  const [editData, setEditData] = useState("");
+  const [editHora, setEditHora] = useState("");
+  const [editSala, setEditSala] = useState("");
+  const [editSalasOcupadas, setEditSalasOcupadas] = useState([]);
+  const navigate = useNavigate();
 
-  // Estado que guarda o paciente selecionado no select
-  const [paciente, setPaciente] = useState("")
+  // Busca salas ocupadas sempre que data ou hora mudar
+  useEffect(() => {
+    if (!data || !hora) { setSalasOcupadas([]); return; }
+    const data_inicio = `${data} ${hora}`;
+    api.get(`/salas-disponiveis?data_inicio=${encodeURIComponent(data_inicio)}`)
+      .then(res => setSalasOcupadas(res.salasOcupadas))
+      .catch(() => setSalasOcupadas([]));
+  }, [data, hora]);
 
-  // Estado que guarda a data escolhida
-  const [data, setData] = useState("")
+  // Busca salas ocupadas para edição
+  useEffect(() => {
+    if (!editData || !editHora) { setEditSalasOcupadas([]); return; }
+    const data_inicio = `${editData} ${editHora}`;
+    api.get(`/salas-disponiveis?data_inicio=${encodeURIComponent(data_inicio)}`)
+      .then(res => setEditSalasOcupadas(res.salasOcupadas))
+      .catch(() => setEditSalasOcupadas([]));
+  }, [editData, editHora]);
 
-  // Estado que guarda o horário escolhido
-  const [hora, setHora] = useState("")
-
-  // Estado para mensagens de erro
-  const [erro, setErro] = useState("")
-
-  // Estado para mensagem de sucesso
-  const [sucesso, setSucesso] = useState("")
-
-  // Estado que guarda a sala selecionada
-  const [sala, setSala] = useState("")
-
-  // Hook para navegação entre páginas
-  const navigate = useNavigate()
-
-  // Função para voltar ao dashboard
-  function voltar_dashboard() {
-    navigate("/dashboard")
+  // Conta sessões do paciente selecionado
+  function sessoesRestantes(pacienteId) {
+    if (!limites) return null;
+    const s = limites.sessoesPorPaciente.find(x => x.paciente_id === parseInt(pacienteId));
+    return limites.maxSessoes - (s ? s.sessoes : 0);
   }
 
-  // Função principal de agendamento
-  function agendar() {
-
-    // Validação: verifica se todos os campos foram preenchidos
-    if (!paciente || !data || !hora || !sala) {
-      setErro("Preencha todos os campos.") // mostra erro
-      setSucesso("") // limpa sucesso
-      return // interrompe execução
+  async function agendar() {
+    if (!paciente || !data || !hora || !sala) { setErro("Preencha todos os campos."); return; }
+    setErro(""); setSucesso("");
+    try {
+      await api.post('/agendamentos', { paciente_id: paciente, sala_id: sala, data_inicio: `${data} ${hora}` });
+      await atualizarLista();
+      setSucesso("Agendamento realizado com sucesso!");
+      setPaciente(""); setData(""); setHora(""); setSala(""); setSalasOcupadas([]);
+    } catch (err) {
+      setErro(err.error || "Erro ao agendar.");
     }
-
-    // Busca o paciente selecionado dentro da lista de pacientes
-    const pacienteSelecionado = pacientes.find(
-      (p) => String(p.id) === paciente
-    )
-
-    // Se não encontrar o paciente, mostra erro
-    if (!pacienteSelecionado) {
-      setErro("Paciente não encontrado.")
-      setSucesso("")
-      return
-    }
-
-    // Cria o objeto de agendamento
-    const novoAgendamento = {
-      id: Date.now(), // cria um ID único baseado no tempo
-      nomePaciente: pacienteSelecionado.nome, // nome do paciente
-      data: data, // data selecionada
-      hora: hora, // horário selecionado
-      sala: sala // sala escolhida
-    }
-
-    // Logs para debug (ver no console do navegador)
-    console.log("clicou em agendar")
-    console.log("paciente selecionado id:", paciente)
-    console.log("data:", data)
-    console.log("hora:", hora)
-    console.log("sala:", sala)
-
-    // Chama a função que veio do App.jsx para salvar o agendamento
-    adicionarAgendamento(novoAgendamento)
-    
-    // Mensagem de sucesso
-    setSucesso("Paciente agendado com sucesso!")
-
-    // Limpa mensagem de erro
-    setErro("")
-
-    // Limpa os campos após salvar
-    setData("")
-    setHora("")
-    setPaciente("")
-    setSala("")
   }
 
-  // Mostra no console todos os agendamentos (debug)
-  console.log(agendamentos)
+  async function cancelar(id) {
+    if (!window.confirm("Deseja cancelar este agendamento?")) return;
+    try {
+      await api.delete(`/agendamentos/${id}`);
+      await atualizarLista();
+      setSucesso("Agendamento cancelado.");
+    } catch (err) {
+      setErro(err.error || "Erro ao cancelar.");
+    }
+  }
 
-  // Retorno da interface da tela
+  function iniciarEdicao(a) {
+    setEditandoId(a.id);
+    const [d, h] = a.data_inicio.split(' ');
+    setEditData(d);
+    setEditHora(h);
+    setEditSala(a.sala_id);
+  }
+
+  async function salvarEdicao(id) {
+    if (!editData || !editHora || !editSala) { setErro("Preencha todos os campos."); return; }
+    setErro(""); setSucesso("");
+    try {
+      await api.put(`/agendamentos/${id}`, { sala_id: editSala, data_inicio: `${editData} ${editHora}` });
+      await atualizarLista();
+      setSucesso("Agendamento atualizado!");
+      setEditandoId(null);
+    } catch (err) {
+      setErro(err.error || "Erro ao atualizar.");
+    }
+  }
+
+  const sessoesRestantesPacienteSelecionado = paciente ? sessoesRestantes(paciente) : null;
+
   return (
-    <div>
-      
-      {/* Título da página */}
-      <h1>Meus Agendamentos</h1>
+    <div style={{ maxWidth: 700, margin: "20px auto", padding: 20 }}>
+      <h1>Agendamentos</h1>
 
-      {/* Select para escolher o paciente */}
-      <select value={paciente} onChange={(e) => setPaciente(e.target.value)}>
+      <h2>Novo Agendamento</h2>
+
+      {/* Seleção de paciente */}
+      <select value={paciente} onChange={(e) => setPaciente(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8 }}>
         <option value="">Selecione um paciente</option>
-
-        {/* Percorre a lista de pacientes e cria opções */}
-        {pacientes.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.nome}
-          </option>
-        ))}
+        {pacientes.map((p) => {
+          const restantes = sessoesRestantes(p.id);
+          const esgotado = restantes !== null && restantes <= 0;
+          return (
+            <option key={p.id} value={p.id} disabled={esgotado}>
+              {p.nome} {esgotado ? "— Sessões esgotadas" : restantes !== null ? `(${restantes} sessões restantes)` : ""}
+            </option>
+          );
+        })}
       </select>
 
-      {/* Select para escolher a sala */}
-      <select value={sala} onChange={(e) => setSala(e.target.value)}>
-        <option value="">Selecione uma sala</option>
-        <option value="Sala 1">Sala 1</option>
-        <option value="Sala 2">Sala 2</option>
-        <option value="Sala 3">Sala 3</option>
-        <option value="Sala 4">Sala 4</option>
-        <option value="Sala 5">Sala 5</option>
-        <option value="Sala 6">Sala 6</option>
-        <option value="Sala 7">Sala 7</option>
+      {sessoesRestantesPacienteSelecionado !== null && (
+        <p style={{ color: sessoesRestantesPacienteSelecionado <= 0 ? "red" : sessoesRestantesPacienteSelecionado <= 2 ? "orange" : "green", marginBottom: 8 }}>
+          {sessoesRestantesPacienteSelecionado <= 0
+            ? "⚠️ Este paciente não tem mais sessões disponíveis."
+            : `✅ ${sessoesRestantesPacienteSelecionado} sessões restantes com este paciente.`}
+        </p>
+      )}
+
+      {/* Data e hora */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <input type="date" value={data} onChange={(e) => setData(e.target.value)} style={{ flex: 1, padding: 10 }} />
+        <input type="time" value={hora} onChange={(e) => setHora(e.target.value)} style={{ flex: 1, padding: 10 }} />
+      </div>
+
+      {/* Seleção de sala com bloqueio em tempo real */}
+      <select value={sala} onChange={(e) => setSala(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8 }}
+        disabled={!data || !hora}>
+        <option value="">{!data || !hora ? "Escolha data e hora primeiro" : "Selecione uma sala"}</option>
+        {TODAS_SALAS.map((s) => {
+          const ocupada = salasOcupadas.includes(s);
+          return (
+            <option key={s} value={s} disabled={ocupada}>
+              Sala {s} {ocupada ? "— Ocupada" : "— Disponível"}
+            </option>
+          );
+        })}
       </select>
 
-      {/* Campo para selecionar data */}
-      <input
-        type="date"
-        value={data}
-        onChange={(e) => setData(e.target.value)}
-      />
+      {data && hora && salasOcupadas.length > 0 && (
+        <p style={{ color: "orange", fontSize: "0.9em", marginBottom: 8 }}>
+          ⚠️ {salasOcupadas.length} sala(s) ocupada(s) neste horário.
+        </p>
+      )}
 
-      {/* Campo para selecionar horário */}
-      <input
-        type="time"
-        value={hora}
-        onChange={(e) => setHora(e.target.value)}
-      />
+      <button onClick={agendar} style={{ width: "100%", padding: 10, marginBottom: 8 }}>Agendar</button>
+      <button onClick={() => navigate("/Dashboard")} style={{ width: "100%", padding: 10, marginBottom: 16 }}>Voltar</button>
 
-      {/* Botão que chama a função de agendar */}
-      <button onClick={agendar}>Agendar</button>
-
-      {/* Botão para voltar ao dashboard */}
-      <button onClick={voltar_dashboard}>Voltar</button>
-
-      {/* Mostra erro apenas se existir */}
       {erro && <p style={{ color: "red" }}>{erro}</p>}
-
-      {/* Mostra sucesso apenas se existir */}
       {sucesso && <p style={{ color: "green" }}>{sucesso}</p>}
 
       {/* Lista de agendamentos */}
-      {agendamentos.map((a) => (
-        <div
-          key={a.id}
-          style={{
-            border: "1px solid black",
-            margin: "10px",
-            padding: "10px"
-          }}
-        >
-          <p>Paciente: {a.nomePaciente}</p>
-          <p>Data: {a.data}</p>
-          <p>Hora: {a.hora}</p>
-          <p>Sala: {a.sala}</p>
-        </div>
-      ))}
-    
+      <h2>Agendamentos Realizados ({agendamentos.length})</h2>
+      {agendamentos.length === 0 ? (
+        <p>Nenhum agendamento encontrado.</p>
+      ) : (
+        agendamentos.map((a) => (
+          <div key={a.id} style={{ border: "1px solid #ccc", margin: "8px 0", padding: 12, borderRadius: 6 }}>
+            {editandoId === a.id ? (
+              <>
+                <p><strong>Paciente:</strong> {a.nomePaciente}</p>
+                <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                  <input type="date" value={editData} onChange={(e) => setEditData(e.target.value)} style={{ flex: 1, padding: 8 }} />
+                  <input type="time" value={editHora} onChange={(e) => setEditHora(e.target.value)} style={{ flex: 1, padding: 8 }} />
+                </div>
+                <select value={editSala} onChange={(e) => setEditSala(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 6 }}>
+                  <option value="">Selecione uma sala</option>
+                  {TODAS_SALAS.map((s) => {
+                    const ocupada = editSalasOcupadas.includes(s) && parseInt(editSala) !== s;
+                    return (
+                      <option key={s} value={s} disabled={ocupada}>
+                        Sala {s} {ocupada ? "— Ocupada" : "— Disponível"}
+                      </option>
+                    );
+                  })}
+                </select>
+                <button onClick={() => salvarEdicao(a.id)} style={{ marginRight: 8 }}>Salvar</button>
+                <button onClick={() => setEditandoId(null)}>Cancelar</button>
+              </>
+            ) : (
+              <>
+                <p><strong>Paciente:</strong> {a.nomePaciente}</p>
+                <p><strong>Estagiário:</strong> {a.nomeEstagiario}</p>
+                <p><strong>Data:</strong> {a.data_inicio}</p>
+                <p><strong>Sala:</strong> {a.sala_id}</p>
+                <button onClick={() => iniciarEdicao(a)} style={{ marginRight: 8 }}>✏️ Editar</button>
+                <button onClick={() => cancelar(a.id)} style={{ color: "red" }}>❌ Cancelar</button>
+              </>
+            )}
+          </div>
+        ))
+      )}
     </div>
-  )
+  );
 }
 
-// Exporta o componente para ser usado no App.jsx
-export default Agendamentos
+export default Agendamentos;
