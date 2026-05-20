@@ -96,7 +96,7 @@ const CadastroEstagiario = ({ usuarioLogadoId }) => {
           </select>
         </div>
 
-         <button type="submit" style={{ width: '100%', padding: '10px' }}>Cadastrar</button>
+        <button type="submit" style={{ width: '100%', padding: '10px' }}>Cadastrar</button>
         <button type="button" onClick={() => navigate('/')} style={{ width: '100%', padding: '10px', marginTop: '8px' }}>
           Voltar ao Login
         </button>
