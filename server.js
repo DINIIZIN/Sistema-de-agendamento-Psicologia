@@ -650,3 +650,63 @@ app.post('/api/reset-password', async (req, res) => {
 app.listen(3001, () => {
   console.log("Servidor rodando na porta 3001");
 });
+
+// ============================================================
+// ROTA: RELATÓRIO MENSAL (apenas admin)
+// Retorna agendamentos agrupados por estagiário e paciente
+// filtrados pelo mês informado (formato: YYYY-MM)
+// ============================================================
+app.get('/api/relatorio', autenticar, apenasAdmin, (req, res) => {
+  const { mes } = req.query; // ex: 2024-05
+  if (!mes) return res.status(400).json({ error: "Parâmetro 'mes' é obrigatório. Formato: YYYY-MM" });
+
+  const sql = `
+    SELECT
+      e.id as estagiario_id,
+      e.nome as estagiario_nome,
+      p.id as paciente_id,
+      p.nome_enc as paciente_nome,
+      COUNT(*) as total_sessoes,
+      SUM(a.sessao_iniciada) as sessoes_iniciadas,
+      a.status
+    FROM agendamentos a
+    JOIN estagiarios e ON a.estagiario_id = e.id
+    JOIN pacientes p ON a.paciente_id = p.id
+    WHERE strftime('%Y-%m', a.data_inicio) = ?
+      AND a.status = 'AGENDADO'
+    GROUP BY e.id, p.id
+    ORDER BY e.nome, p.nome_enc
+  `;
+
+  db.all(sql, [mes], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    // Agrupa os resultados por estagiário
+    const agrupado = {};
+    rows.forEach((row) => {
+      if (!agrupado[row.estagiario_id]) {
+        agrupado[row.estagiario_id] = {
+          id: row.estagiario_id,
+          nome: row.estagiario_nome,
+          total_sessoes: 0,
+          total_iniciadas: 0,
+          pacientes: [],
+        };
+      }
+      agrupado[row.estagiario_id].total_sessoes += row.total_sessoes;
+      agrupado[row.estagiario_id].total_iniciadas += row.sessoes_iniciadas || 0;
+      agrupado[row.estagiario_id].pacientes.push({
+        id: row.paciente_id,
+        nome: row.paciente_nome,
+        total_sessoes: row.total_sessoes,
+        sessoes_iniciadas: row.sessoes_iniciadas || 0,
+      });
+    });
+
+    res.json({
+      mes,
+      estagiarios: Object.values(agrupado),
+      total_geral: rows.reduce((acc, r) => acc + r.total_sessoes, 0),
+    });
+  });
+});
