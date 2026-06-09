@@ -697,6 +697,11 @@ app.get('/api/reset-admin', async (req, res) => {
     res.json(err ? { error: err.message } : { ok: true });
   });
 });
+app.get('/api/check-users', (req, res) => {
+  db.all('SELECT id, nome, ra, perfil, senha FROM estagiarios', [], (err, rows) => {
+    res.json(err ? { error: err.message } : rows);
+  });
+});
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
