@@ -716,6 +716,13 @@ app.get('/api/reset-sonia', async (req, res) => {
     res.json(err ? { error: err.message } : { ok: true });
   });
 });
+app.get('/api/test-login', async (req, res) => {
+  db.get('SELECT senha FROM estagiarios WHERE ra=?', ['Sonia'], async (err, row) => {
+    if (!row) return res.json({ error: 'user not found' });
+    const match = await bcrypt.compare('123456', row.senha);
+    res.json({ match, hash: row.senha });
+  });
+});
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
