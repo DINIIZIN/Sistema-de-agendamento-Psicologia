@@ -8,9 +8,11 @@ import crypto from 'crypto';         // Gera tokens seguros para recuperação d
 import bcrypt from 'bcrypt';         // Criptografa senhas antes de salvar no banco
 import jwt from 'jsonwebtoken';      // Cria e valida tokens de autenticação (JWT)
 import dotenv from 'dotenv';         // Carrega variáveis de ambiente do arquivo .env
-
-// Carrega as variáveis do .env (ex: JWT_SECRET)
 dotenv.config();
+import { Resend } from 'resend'
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+// Carrega as variáveis do .env (ex: JWT_SECRET)
 
 // Cria a aplicação Express
 const app = express();
@@ -373,14 +375,14 @@ app.post('/api/agendamentos', autenticar, (req, res) => {
       return res.status(403).json({ error: "Este paciente não pertence a você." });
 
     // Verifica se o paciente ainda tem sessões disponíveis
-    db.get(
-      `SELECT COUNT(*) as total FROM agendamentos WHERE paciente_id = ? AND estagiario_id = ? AND status = 'AGENDADO'`,
-      [paciente_id, estagiario_id],
-      (err, row) => {
-        if (err) return res.status(500).json({ error: "Erro interno no servidor." });
-        if (row.total >= MAX_SESSOES_POR_PACIENTE)
-          return res.status(400).json({ error: `Limite atingido. Máximo de ${MAX_SESSOES_POR_PACIENTE} sessões por paciente.` });
-
+   db.get(
+  `SELECT COUNT(*) as total FROM agendamentos WHERE paciente_id = ? AND estagiario_id = ? AND status IN ('AGENDADO', 'CONCLUIDO')`,
+  [paciente_id, estagiario_id],
+  (err, row) => {
+    if (err) return res.status(500).json({ error: "Erro interno no servidor." });
+    if (!row) return res.status(500).json({ error: "Erro ao contar sessões." });
+    if (row.total >= MAX_SESSOES_POR_PACIENTE)
+      return res.status(400).json({ error: `Limite atingido. Máximo de ${MAX_SESSOES_POR_PACIENTE} sessões por paciente.` });
         // Verifica se o paciente já tem sessão no mesmo dia (regra de negócio)
         const dataApenas = data_inicio.split(' ')[0];
         db.get(
@@ -510,8 +512,8 @@ app.post('/api/agendamentos/:id/iniciar', autenticar, (req, res) => {
   const distancia = calcularDistancia(latitude, longitude, CLINICA_LAT, CLINICA_LNG);
 
   // Bloqueia se o estagiário estiver fora do raio permitido
-  if (distancia > RAIO_METROS)
-    return res.status(403).json({ error: `Você está a ${Math.round(distancia)}m da clínica. É necessário estar a menos de ${RAIO_METROS}m para iniciar a sessão.` });
+  //if (distancia > RAIO_METROS)
+    //return res.status(403).json({ error: `Você está a ${Math.round(distancia)}m da clínica. É necessário estar a menos de ${RAIO_METROS}m para iniciar a sessão.` });
 
   db.get(`SELECT * FROM agendamentos WHERE id = ?`, [id], (err, ag) => {
     if (err) return res.status(500).json({ error: "Erro interno." });
@@ -537,20 +539,24 @@ app.post('/api/agendamentos/:id/iniciar', autenticar, (req, res) => {
 // ============================================================
 // ROTA: CANCELAR AGENDAMENTO (apenas admin)
 // ============================================================
-app.delete('/api/agendamentos/:id', autenticar, apenasAdmin, (req, res) => {
+app.delete('/api/agendamentos/:id', autenticar, (req, res) => {
   const { id } = req.params;
 
-  db.get(`SELECT id FROM agendamentos WHERE id = ?`, [id], (err, ag) => {
+  db.get(`SELECT estagiario_id FROM agendamentos WHERE id = ?`, [id], (err, ag) => {
     if (err) return res.status(500).json({ error: "Erro interno." });
     if (!ag) return res.status(404).json({ error: "Agendamento não encontrado." });
+    // Estagiário só pode cancelar os próprios agendamentos
+    if (req.usuario.perfil !== 'MEDICO' && ag.estagiario_id !== req.usuario.id)
+      return res.status(403).json({ error: "Você não tem permissão para cancelar este agendamento." });
 
-    // Não deleta o registro — muda o status para CANCELADO para manter o histórico
     db.run("UPDATE agendamentos SET status = 'CANCELADO' WHERE id = ?", [id], function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: "Agendamento cancelado com sucesso!" });
     });
   });
 });
+    
+
 
 // ============================================================
 // ROTA: MEUS LIMITES (contadores do estagiário logado)
@@ -564,7 +570,7 @@ app.get('/api/meus-limites', autenticar, (req, res) => {
 
     // Conta sessões agendadas por paciente (para mostrar quantas sessões restam)
     db.all(
-      `SELECT paciente_id, COUNT(*) as sessoes FROM agendamentos WHERE estagiario_id = ? AND status = 'AGENDADO' GROUP BY paciente_id`,
+      `SELECT paciente_id, COUNT(*) as sessoes FROM agendamentos WHERE estagiario_id = ? AND status IN ('AGENDADO' , 'CONCLUIDO') GROUP BY paciente_id`,
       [estagiario_id],
       (err, rowS) => {
         if (err) return res.status(500).json({ error: "Erro interno." });
@@ -586,30 +592,45 @@ app.post('/api/forgot-password', (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "E-mail é obrigatório." });
 
-  db.get("SELECT id FROM estagiarios WHERE email = ?", [email], (err, user) => {
+  db.get("SELECT id FROM estagiarios WHERE email = ?", [email], async (err, user) => {
     if (err) return res.status(500).json({ error: "Erro interno no servidor." });
-
-    // Retorna a mesma mensagem se o e-mail existir ou não (segurança: não revela quais e-mails existem)
     if (!user) return res.json({ message: "Se o e-mail existir, um link de recuperação foi enviado." });
 
-    // Gera um token aleatório e salva seu hash no banco (nunca o token bruto)
     const token = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const expiraEm = new Date(Date.now() + 3600000).toISOString(); // Expira em 1 hora
+    const expiraEm = new Date(Date.now() + 3600000).toISOString();
 
     db.run(
       "INSERT INTO tokens_recuperacao (estagiario_id, token_hash, expira_em) VALUES (?, ?, ?)",
       [user.id, tokenHash, expiraEm],
-      (err) => {
+      async (err) => {
         if (err) return res.status(500).json({ error: "Erro ao gerar token." });
-        // Em produção, esse link seria enviado por e-mail; em dev, aparece no console
-        console.log(`[RECUPERAÇÃO] http://localhost:5173/reset-password?token=${token}`);
-        res.json({ message: "Se o e-mail existir, um link de recuperação foi enviado." });
+
+        const link = `http://localhost:5173/reset-password?token=${token}`;
+
+        try {
+          await resend.emails.send({
+            from: 'Sistema Psicologia <onboarding@resend.dev>',
+            to: email,
+            subject: 'Recuperação de Senha',
+            html: `
+              <h2>Recuperação de Senha</h2>
+              <p>Clique no link abaixo para redefinir sua senha. O link expira em 1 hora.</p>
+              <a href="${link}" style="background:#007bff;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;">
+                Redefinir Senha
+              </a>
+              <p style="color:#888;font-size:12px;margin-top:16px;">Se você não solicitou isso, ignore este e-mail.</p>
+            `,
+          });
+          res.json({ message: "Se o e-mail existir, um link de recuperação foi enviado." });
+        } catch (emailErr) {
+          console.error("Erro ao enviar e-mail:", emailErr);
+          res.status(500).json({ error: "Erro ao enviar e-mail de recuperação." });
+        }
       }
     );
   });
 });
-
 // ============================================================
 // ROTA: ESQUECI MINHA SENHA — Redefinir senha com token
 // ============================================================
@@ -645,10 +666,32 @@ app.post('/api/reset-password', async (req, res) => {
 });
 
 // ============================================================
+// JOB AGENDADO — finaliza sessões automaticamente após 50 minutos
+// Roda a cada 1 minuto verificando sessões que passaram do tempo
+// ============================================================
+setInterval(() => {
+  db.run(
+    `UPDATE agendamentos 
+     SET status = 'CONCLUIDO'
+     WHERE sessao_iniciada = 1 
+     AND status = 'AGENDADO'
+     AND datetime(data_inicio_real, '+50 minutes') <= datetime('now')`,
+    function (err) {
+      if (err) {
+        console.error("Erro ao finalizar sessões:", err.message);
+      } else if (this.changes > 0) {
+        console.log(`[JOB] ${this.changes} sessão(ões) finalizada(s) automaticamente.`);
+      }
+    }
+  );
+}, 60000); // 60000ms = 1 minuto
+
+// ============================================================
 // INICIA O SERVIDOR na porta 3001
 // ============================================================
-app.listen(3001, () => {
-  console.log("Servidor rodando na porta 3001");
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
 
 // ============================================================
@@ -673,7 +716,7 @@ app.get('/api/relatorio', autenticar, apenasAdmin, (req, res) => {
     JOIN estagiarios e ON a.estagiario_id = e.id
     JOIN pacientes p ON a.paciente_id = p.id
     WHERE strftime('%Y-%m', a.data_inicio) = ?
-      AND a.status = 'AGENDADO'
+    AND a.status IN  ('AGENDADO', 'CONCLUIDO')  -- Considera apenas sessões que foram agendadas ou concluídas
     GROUP BY e.id, p.id
     ORDER BY e.nome, p.nome_enc
   `;
