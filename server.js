@@ -5,7 +5,7 @@ import express from 'express';       // Framework web para criar as rotas HTTP
 import sqlite3 from 'sqlite3';       // Banco de dados SQLite (arquivo local)
 import cors from 'cors';             // Permite que o frontend acesse a API de outra porta
 import crypto from 'crypto';         // Gera tokens seguros para recuperação de senha
-import bcrypt from 'bcrypt';         // Criptografa senhas antes de salvar no banco
+import bcrypt from 'bcryptjs';         // Criptografa senhas antes de salvar no banco
 import jwt from 'jsonwebtoken';      // Cria e valida tokens de autenticação (JWT)
 import dotenv from 'dotenv';         // Carrega variáveis de ambiente do arquivo .env
 dotenv.config();
