@@ -690,6 +690,13 @@ setInterval(() => {
 // INICIA O SERVIDOR na porta 3001
 // ============================================================
 const PORT = process.env.PORT || 3001;
+app.get('/api/reset-admin', async (req, res) => {
+  const bcrypt = await import('bcrypt');
+  const hash = await bcrypt.default.hash('123456', 10);
+  db.run(`INSERT OR REPLACE INTO estagiarios (nome, ra, senha, perfil) VALUES ('Admin', 'admin', ?, 'MEDICO')`, [hash], (err) => {
+    res.json(err ? { error: err.message } : { ok: true });
+  });
+});
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
