@@ -709,6 +709,13 @@ app.get('/api/reset-sonia', async (req, res) => {
     res.json(err ? { error: err.message } : { ok: true });
   });
 });
+app.get('/api/reset-sonia', async (req, res) => {
+  const bcrypt = await import('bcrypt');
+  const hash = await bcrypt.default.hash('123456', 10);
+  db.run(`UPDATE estagiarios SET senha=? WHERE ra='Sonia'`, [hash], (err) => {
+    res.json(err ? { error: err.message } : { ok: true });
+  });
+});
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
